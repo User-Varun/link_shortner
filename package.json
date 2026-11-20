@@ -1,0 +1,17 @@
+{
+  "name": "link_shortner",
+  "version": "1.0.0",
+  "description": "",
+  "main": "load-test.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/User-Varun/link_shortner.git"
+  },
+  "private": true,
+  "dependencies": {
+    "k6": "^0.0.0"
+  }
+}

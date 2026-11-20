@@ -9,5 +9,4 @@ public class LinkShortnerApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(LinkShortnerApplication.class, args);
 	}
-
 }
