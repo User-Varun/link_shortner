@@ -3,33 +3,29 @@ package com.varun.link_shortner.services;
 import com.varun.link_shortner.dto.ShortenResponse;
 import com.varun.link_shortner.dto.UpdateRequest;
 import com.varun.link_shortner.exceptions.InvalidArgumentException;
-import com.varun.link_shortner.exceptions.RedisException;
 import com.varun.link_shortner.exceptions.ShortCodeNotFoundException;
 import com.varun.link_shortner.repositories.UrlRepository;
 import com.varun.link_shortner.models.UrlModel;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
-import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class UrlService {
 
-    private static final Logger log = LoggerFactory.getLogger(UrlService.class);
-    
-    @Autowired
-    private UrlRepository ur;
+
+    private final  UrlRepository ur;
+
+    private final RedisTemplate<String , String> redisTemplate;
 
     @Value("${app.base.url}")
     String baseUrl;
@@ -43,9 +39,21 @@ public class UrlService {
     @Value("${app.base.cacheExpirationHour}")
     int expirationHours;
 
+    @Value("${app.base.urlCounterRedis}")
+    long ID_COUNTER;
 
-    @Autowired
-    private RedisTemplate<String , String> redisTemplate;
+    @Value("${app.base.counterKey")
+    String COUNTER_KEY;
+
+    @Value("${app.base.redisCounterOffset}")
+    String COUNTER_OFFSET;
+
+
+
+    @PostConstruct
+    public void initCounter() {
+        redisTemplate.opsForValue().setIfAbsent(COUNTER_KEY , String.valueOf(ID_COUNTER));
+    }
 
 
     @Transactional
@@ -56,27 +64,35 @@ public class UrlService {
         }
 
         String trimmed = originalUrl.trim();
+        String normalizedUrl = normalizeUrl(trimmed);
 
         // check if the url exists, if it does,return that.
-        UrlModel res = ur.findByOriginalUrl(trimmed);
+        UrlModel res = ur.findByOriginalUrl(normalizedUrl);
 
         if (res != null) {
             return new ShortenResponse(baseUrl + "/" + res.getShortCode() , res.getShortCode());
         }
 
         // otherwise generate new url
+        Long uniqueId = redisTemplate.opsForValue().increment(COUNTER_KEY);
+
+        if(uniqueId == null) throw new ShortCodeNotFoundException("failed to generate unique id from redis");
+
         UrlModel newUrlObj = new UrlModel();
 
-        newUrlObj.setOriginalUrl(trimmed);
+        String shortCode = encode(uniqueId);
 
-        UrlModel obj = ur.save(newUrlObj);
+        newUrlObj.setOriginalUrl(normalizedUrl);
+        newUrlObj.setShortCode(shortCode);
 
-        String shortCode = generateBase62String(obj.getId());
+        UrlModel saved = ur.save(newUrlObj);
 
-        obj.setShortCode(shortCode);
-
-
-        UrlModel saved = ur.save(obj);
+        // add to the redis cache
+        try{
+            redisTemplate.opsForValue().set(saved.getShortCode() , saved.getOriginalUrl() , Duration.ofHours(expirationHours));
+        }catch(DataAccessException ex){
+            log.warn(ex.getMessage() + " during write, skipping cache update: {}");
+        }
 
         return new ShortenResponse(baseUrl + "/" + saved.getShortCode() , saved.getShortCode());
     }
@@ -95,7 +111,7 @@ public class UrlService {
         }
 
         if(value != null){
-            return value;
+            return normalizeUrl(value);
         }
 
         
@@ -110,7 +126,7 @@ public class UrlService {
             log.warn(e.getMessage() + " during write, skipping cache update: {}");
         }
 
-        return res.getOriginalUrl();
+        return normalizeUrl(res.getOriginalUrl());
     }
 
     public UpdateRequest updateUrl(UpdateRequest req){
@@ -149,17 +165,50 @@ public class UrlService {
         ur.deleteByShortCode(shortCode);
     }
 
-    private String generateBase62String(Long id) {
 
-        StringBuilder sb = new StringBuilder();
+    /**
+     * Generates a fixed-length Base62 short code by combining the atomic Redis counter ID
+     * with a configured offset. Configuration values ({@code base}, {@code chars}, and
+     * {@code offset}) are loaded from {@code application.properties}.
+     *
+     * <ul>
+     *      <li>offset :- bigger number (62 ^ 6)  to generate 7 char shortcodes </li>
+     *      <li>chars :- the jumbled base62 string, used for readability.</li>
+     *      <li>base :- used 62 this should match with the {@code chars.length } for consistent shortCode generation</li>
+     * </ul>
+     *
+     *
+     * @param redisId id generated by the redis counter atomically.
+     */
+    private String encode(long redisId) {
+
+        long uniqueId = Long.parseLong(COUNTER_OFFSET) + redisId;
+
+        StringBuilder sb = new StringBuilder(7);
 
         // encoder
         do {
-            sb.insert(0, chars.charAt((int) (id % base)));
-            id /= base;
+            sb.insert(0, chars.charAt((int) (uniqueId % base)));
+            uniqueId /= base;
 
-        } while (id > 0);
+        } while (uniqueId > 0);
 
         return sb.toString();
+    }
+
+    /**
+     * returns url in format "https://url-here" lowercased
+     *
+     * @param url normalized url
+     */
+    private String normalizeUrl(String url) {
+        String trimmedUrl = url.trim();
+        String lowerCaseUrl = trimmedUrl.toLowerCase();
+
+        if (lowerCaseUrl.startsWith("http://") || lowerCaseUrl.startsWith("https://")) {
+            return trimmedUrl;
+        }
+
+        return "https://" + trimmedUrl;
     }
 }

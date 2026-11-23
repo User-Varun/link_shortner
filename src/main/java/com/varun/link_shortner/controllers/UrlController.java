@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Null;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,10 +25,11 @@ import java.nio.channels.ScatteringByteChannel;
 @RestController
 @RequestMapping("/api/shortner")
 @Tag(name = "URL API's")
+@RequiredArgsConstructor
 public class UrlController {
 
-    @Autowired
-    private UrlService us;
+
+    private final UrlService us;
 
     /**
      * Shortens a given String, preferably url into a short reference to it.

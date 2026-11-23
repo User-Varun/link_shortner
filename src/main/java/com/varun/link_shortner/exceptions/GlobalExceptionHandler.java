@@ -22,4 +22,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> handleRedisException(RedisException ex){
         return ResponseEntity.badRequest().body(ex.getMessage());
     }
+
+    @ExceptionHandler(ShortCodeGenerationFailedException.class)
+    public ResponseEntity<String> handleShortCodeGenFailed(ShortCodeGenerationFailedException ex){
+        return ResponseEntity.internalServerError().body(ex.getMessage());
+    }
 }
